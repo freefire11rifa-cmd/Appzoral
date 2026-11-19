@@ -1,0 +1,302 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core security primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedEmail() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isVerifiedDeveloper(uid) {
+      return exists(/databases/$(database)/documents/developers/$(uid)) &&
+        get(/databases/$(database)/documents/developers/$(uid)).data.status == 'verified';
+    }
+
+    // Validation Blueprint: DeveloperProfile
+    function isValidDeveloper(data) {
+      return data.keys().hasAll([
+        'uid', 'firstName', 'lastName', 'mobile', 'email', 'passwordHash',
+        'agreedToTerms', 'status', 'verificationToken', 'studioName',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'uid', 'firstName', 'lastName', 'mobile', 'email', 'passwordHash',
+        'agreedToTerms', 'status', 'verificationToken', 'studioName',
+        'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.uid) &&
+      data.uid == request.auth.uid &&
+      data.firstName is string && data.firstName.size() >= 1 && data.firstName.size() <= 60 &&
+      data.lastName is string && data.lastName.size() >= 1 && data.lastName.size() <= 60 &&
+      data.mobile is string && data.mobile.size() == 11 && data.mobile.matches('^01[3-9][0-9]{8}$') &&
+      data.email is string && data.email.size() >= 5 && data.email.size() <= 150 &&
+      data.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$') &&
+      data.passwordHash is string && data.passwordHash.size() >= 32 && data.passwordHash.size() <= 128 &&
+      data.agreedToTerms is bool && data.agreedToTerms == true &&
+      data.status in ['pending_verification', 'verified'] &&
+      data.verificationToken is string && data.verificationToken.size() >= 8 &&
+      data.verificationToken.size() <= 64 && data.verificationToken.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.studioName is string && data.studioName.size() >= 1 && data.studioName.size() <= 80 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: StoreApp
+    function isValidScreenshotsList(listData) {
+      return listData is list && listData.size() <= 4 && (
+        listData.size() == 0 || (
+          listData[0] is string && listData[0].size() <= 220000
+        )
+      );
+    }
+
+    function isValidApp(data) {
+      return data.keys().hasAll([
+        'id', 'ownerId', 'title', 'titleLower', 'packageName', 'developerName',
+        'appType', 'category', 'shortDescription', 'description', 'whatsNew',
+        'version', 'sizeLabel', 'ageRating', 'iconUrl', 'bannerUrl', 'screenshots',
+        'downloadUrl', 'apkFileName', 'rating', 'ratingCount', 'installCount',
+        'status', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'ownerId', 'title', 'titleLower', 'packageName', 'developerName',
+        'appType', 'category', 'shortDescription', 'description', 'whatsNew',
+        'version', 'sizeLabel', 'ageRating', 'iconUrl', 'bannerUrl', 'screenshots',
+        'downloadUrl', 'apkFileName', 'rating', 'ratingCount', 'installCount',
+        'status', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.id) &&
+      isValidId(data.ownerId) &&
+      data.title is string && data.title.size() >= 2 && data.title.size() <= 80 &&
+      data.titleLower is string && data.titleLower.size() >= 2 && data.titleLower.size() <= 80 &&
+      data.packageName is string && data.packageName.size() >= 3 && data.packageName.size() <= 100 &&
+      data.packageName.matches('^[a-zA-Z0-9_.]+$') &&
+      data.developerName is string && data.developerName.size() >= 2 && data.developerName.size() <= 80 &&
+      data.appType in ['Games', 'Apps'] &&
+      data.category is string && data.category.size() >= 2 && data.category.size() <= 40 &&
+      data.shortDescription is string && data.shortDescription.size() >= 5 && data.shortDescription.size() <= 160 &&
+      data.description is string && data.description.size() >= 10 && data.description.size() <= 2500 &&
+      data.whatsNew is string && data.whatsNew.size() <= 500 &&
+      data.version is string && data.version.size() >= 1 && data.version.size() <= 24 &&
+      data.sizeLabel is string && data.sizeLabel.size() >= 2 && data.sizeLabel.size() <= 24 &&
+      data.ageRating in ['3+', '7+', '12+', '16+', '18+'] &&
+      data.iconUrl is string && data.iconUrl.size() >= 1 && data.iconUrl.size() <= 200000 &&
+      data.bannerUrl is string && data.bannerUrl.size() <= 250000 &&
+      isValidScreenshotsList(data.screenshots) &&
+      data.downloadUrl is string && data.downloadUrl.size() <= 500 &&
+      data.apkFileName is string && data.apkFileName.size() <= 120 &&
+      (data.rating is number) && data.rating >= 0 && data.rating <= 5 &&
+      (data.ratingCount is number) && data.ratingCount >= 0 &&
+      (data.installCount is number) && data.installCount >= 0 &&
+      data.status in ['published', 'draft'] &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: AppReview
+    function isValidReview(data, appId) {
+      return data.keys().hasAll([
+        'id', 'appId', 'authorId', 'authorName', 'authorPhoto',
+        'rating', 'comment', 'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id', 'appId', 'authorId', 'authorName', 'authorPhoto',
+        'rating', 'comment', 'createdAt'
+      ]) &&
+      isValidId(data.id) &&
+      isValidId(data.appId) &&
+      data.appId == appId &&
+      isValidId(data.authorId) &&
+      data.authorId == request.auth.uid &&
+      data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+      data.authorPhoto is string && data.authorPhoto.size() <= 500 &&
+      (data.rating is number) && data.rating >= 1 && data.rating <= 5 &&
+      data.comment is string && data.comment.size() >= 2 && data.comment.size() <= 600 &&
+      data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: UserLibraryItem
+    function isValidLibraryItem(data, userId, appId) {
+      return data.keys().hasAll([
+        'appId', 'userId', 'installed', 'wishlisted', 'installedVersion', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'appId', 'userId', 'installed', 'wishlisted', 'installedVersion', 'updatedAt'
+      ]) &&
+      isValidId(data.appId) &&
+      data.appId == appId &&
+      isValidId(data.userId) &&
+      data.userId == userId &&
+      data.installed is bool &&
+      data.wishlisted is bool &&
+      data.installedVersion is string && data.installedVersion.size() <= 24 &&
+      data.updatedAt is timestamp;
+    }
+
+    // /developers/{developerId} — Owner-isolated PII
+    match /developers/{developerId} {
+      allow get: if isValidId(developerId) && isOwner(developerId);
+      allow list: if false;
+      allow create: if isVerifiedEmail() &&
+        isValidId(developerId) &&
+        isOwner(developerId) &&
+        isValidDeveloper(incoming()) &&
+        incoming().status == 'pending_verification' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedEmail() &&
+        isValidId(developerId) &&
+        isOwner(developerId) &&
+        isValidDeveloper(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Verify / Apply Developer Account
+          (
+            existing().status == 'pending_verification' &&
+            incoming().status == 'verified' &&
+            incoming().verificationToken == existing().verificationToken &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          ) ||
+          // Action 2: Update studio name or mobile
+          (
+            incoming().status == existing().status &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['studioName', 'mobile', 'updatedAt'])
+          )
+        );
+      allow delete: if false;
+    }
+
+    // /apps/{appId} — Store catalog
+    match /apps/{appId} {
+      allow get: if isValidId(appId) && (
+        existing().status == 'published' ||
+        (isSignedIn() && existing().ownerId == request.auth.uid)
+      );
+      allow list: if existing().status == 'published';
+      allow create: if isVerifiedEmail() &&
+        isValidId(appId) &&
+        isValidApp(incoming()) &&
+        incoming().id == appId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().rating == 0 &&
+        incoming().ratingCount == 0 &&
+        incoming().installCount == 0 &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isVerifiedDeveloper(request.auth.uid);
+      allow update: if isVerifiedEmail() &&
+        isValidId(appId) &&
+        isValidApp(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Owner updates app listing metadata
+          (
+            existing().ownerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title', 'titleLower', 'developerName', 'appType', 'category',
+              'shortDescription', 'description', 'whatsNew', 'version',
+              'sizeLabel', 'ageRating', 'iconUrl', 'bannerUrl', 'screenshots',
+              'downloadUrl', 'apkFileName', 'status', 'updatedAt'
+            ])
+          ) ||
+          // Action 2: Any verified user installs the app (+1 installCount)
+          (
+            existing().status == 'published' &&
+            incoming().installCount == existing().installCount + 1 &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['installCount', 'updatedAt'])
+          ) ||
+          // Action 3: Rating recalculation when review added
+          (
+            existing().status == 'published' &&
+            incoming().ratingCount == existing().ratingCount + 1 &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'ratingCount', 'updatedAt'])
+          )
+        );
+      allow delete: if isVerifiedEmail() &&
+        isValidId(appId) &&
+        existing().ownerId == request.auth.uid;
+
+      // /apps/{appId}/reviews/{reviewId}
+      match /reviews/{reviewId} {
+        allow get: if isValidId(appId) && isValidId(reviewId) &&
+          get(/databases/$(database)/documents/apps/$(appId)).data.status == 'published';
+        allow list: if existing().appId == appId;
+        allow create: if isVerifiedEmail() &&
+          isValidId(appId) &&
+          isValidId(reviewId) &&
+          isValidReview(incoming(), appId) &&
+          incoming().id == reviewId &&
+          incoming().createdAt == request.time &&
+          exists(/databases/$(database)/documents/apps/$(appId)) &&
+          get(/databases/$(database)/documents/apps/$(appId)).data.status == 'published';
+        allow update: if isVerifiedEmail() &&
+          isValidId(appId) &&
+          isValidId(reviewId) &&
+          isValidReview(incoming(), appId) &&
+          existing().authorId == request.auth.uid &&
+          incoming().authorId == existing().authorId &&
+          incoming().appId == existing().appId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'comment']);
+        allow delete: if isVerifiedEmail() &&
+          isValidId(appId) &&
+          isValidId(reviewId) &&
+          existing().authorId == request.auth.uid;
+      }
+    }
+
+    // /users/{userId}/library/{appId}
+    match /users/{userId}/library/{appId} {
+      allow get: if isValidId(userId) && isValidId(appId) && isOwner(userId);
+      allow list: if isOwner(userId) && existing().userId == request.auth.uid;
+      allow create: if isVerifiedEmail() &&
+        isValidId(userId) &&
+        isValidId(appId) &&
+        isOwner(userId) &&
+        isValidLibraryItem(incoming(), userId, appId) &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/apps/$(appId));
+      allow update: if isVerifiedEmail() &&
+        isValidId(userId) &&
+        isValidId(appId) &&
+        isOwner(userId) &&
+        isValidLibraryItem(incoming(), userId, appId) &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'installed', 'wishlisted', 'installedVersion', 'updatedAt'
+        ]);
+      allow delete: if isVerifiedEmail() &&
+        isValidId(userId) &&
+        isValidId(appId) &&
+        isOwner(userId);
+    }
+  }
+}

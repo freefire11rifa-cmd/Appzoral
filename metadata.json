@@ -1,0 +1,8 @@
+{
+  "name": "Appzora",
+  "description": "Appzora is an app marketplace where users can upload, discover, share, and download Android applications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
